@@ -1,105 +1,145 @@
-import asyncio
 import argparse
+import asyncio
 import sys
-import logging
-from typing import Optional, List
+from pathlib import Path
+from typing import Optional, Dict, Any
 
-from metricmind.utils.config import get_settings
-from metricmind.utils.logger import setup_logger
 from metricmind.core.data_generator import DataGenerator
 from metricmind.core.query_executor import QueryExecutor
+from metricmind.utils.config import get_settings
+from metricmind.utils.logger import setup_logger
+from metricmind.visualization.dashboard import BenchmarkDashboard
 
 logger = setup_logger(__name__)
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="MetricMind CLI")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    
+    # Generate data command
+    generate_parser = subparsers.add_parser("generate", help="Generate TPC-DS data")
+    generate_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="data",
+        help="Output directory for generated data"
+    )
+    generate_parser.add_argument(
+        "--scale-factor",
+        type=float,
+        default=1.0,
+        help="Scale factor for data generation"
+    )
+    
+    # Run benchmark command
+    benchmark_parser = subparsers.add_parser("benchmark", help="Run benchmark comparison")
+    benchmark_parser.add_argument(
+        "--dremio1-url",
+        type=str,
+        required=True,
+        help="URL for first Dremio instance"
+    )
+    benchmark_parser.add_argument(
+        "--dremio2-url",
+        type=str,
+        required=True,
+        help="URL for second Dremio instance"
+    )
+    benchmark_parser.add_argument(
+        "--queries-dir",
+        type=str,
+        default="queries",
+        help="Directory containing TPC-DS queries"
+    )
+    benchmark_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="results",
+        help="Output directory for benchmark results"
+    )
+    benchmark_parser.add_argument(
+        "--iterations",
+        type=int,
+        default=3,
+        help="Number of iterations per query"
+    )
+    
+    # Visualize command
+    visualize_parser = subparsers.add_parser("visualize", help="Visualize benchmark results")
+    visualize_parser.add_argument(
+        "--results-dir",
+        type=str,
+        default="results",
+        help="Directory containing benchmark results"
+    )
+    
+    return parser.parse_args()
+
 async def generate_data(args: argparse.Namespace) -> None:
     """Generate TPC-DS data."""
-    settings = get_settings()
-    
-    # Override settings with command line arguments
-    if args.scale is not None:
-        settings.TPC_DS_SCALE_FACTOR = args.scale
-        
-    logger.info(f"Generating TPC-DS data with scale factor {settings.TPC_DS_SCALE_FACTOR}")
-    
-    async with DataGenerator(settings) as generator:
-        result = await generator.generate_data()
-        
-    if result["status"] == "success":
-        logger.info("Data generation completed successfully")
-        logger.info(f"Generated {result['stats'].successful_files} files")
-        logger.info(f"Total size: {result['stats'].total_size / (1024*1024):.2f} MB")
-        logger.info(f"Average upload speed: {result['stats'].avg_upload_speed / (1024*1024):.2f} MB/s")
-    elif result["status"] == "partial":
-        logger.warning("Data generation completed with some failures")
-        logger.warning(f"Successful: {result['stats'].successful_files}, Failed: {result['stats'].failed_files}")
-    else:
-        logger.error(f"Data generation failed: {result.get('error', 'Unknown error')}")
+    try:
+        generator = DataGenerator(
+            output_dir=Path(args.output_dir),
+            scale_factor=args.scale_factor
+        )
+        await generator.generate()
+        logger.info(f"Data generated successfully in {args.output_dir}")
+    except Exception as e:
+        logger.error(f"Failed to generate data: {str(e)}")
         sys.exit(1)
 
 async def run_benchmark(args: argparse.Namespace) -> None:
     """Run benchmark comparison."""
-    settings = get_settings()
-    
-    # Override settings with command line arguments
-    if args.iterations is not None:
-        settings.BENCHMARK_ITERATIONS = args.iterations
+    try:
+        settings = get_settings()
+        settings.dremio1_url = args.dremio1_url
+        settings.dremio2_url = args.dremio2_url
         
-    logger.info(f"Running benchmark with {settings.BENCHMARK_ITERATIONS} iterations")
-    
-    # Parse query filter if provided
-    query_filter = None
-    if args.queries:
-        query_filter = set(args.queries)
-        logger.info(f"Filtering to queries: {', '.join(query_filter)}")
-    
-    async with QueryExecutor(settings) as executor:
-        result = await executor.run_benchmark(
-            iterations=settings.BENCHMARK_ITERATIONS,
-            query_filter=query_filter
+        executor = QueryExecutor(
+            queries_dir=Path(args.queries_dir),
+            output_dir=Path(args.output_dir),
+            iterations=args.iterations
         )
         
-    if result["metadata"]["status"] == "completed":
-        logger.info("Benchmark completed successfully")
-        
-        # Print summary
-        if "overall" in result["metadata"]:
-            overall = result["metadata"]["overall"]
-            logger.info(f"Average performance ratio: {overall['avg_performance_ratio']:.2f}")
-            logger.info(f"Median performance ratio: {overall['median_performance_ratio']:.2f}")
-            logger.info(f"Success rate: {overall['success_rate']*100:.1f}%")
-    elif result["metadata"]["status"] == "cancelled":
-        logger.warning("Benchmark was cancelled")
-    else:
-        logger.error("Benchmark failed")
+        results = await executor.run_benchmark()
+        logger.info(f"Benchmark completed successfully. Results saved in {args.output_dir}")
+    except Exception as e:
+        logger.error(f"Failed to run benchmark: {str(e)}")
         sys.exit(1)
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="MetricMind - Dremio Benchmarking Tool")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Generate data command
-    generate_parser = subparsers.add_parser("generate-data", help="Generate TPC-DS data")
-    generate_parser.add_argument("--scale", type=float, help="TPC-DS scale factor")
-    
-    # Benchmark command
-    benchmark_parser = subparsers.add_parser("benchmark", help="Run benchmark comparison")
-    benchmark_parser.add_argument("--iterations", type=int, help="Number of iterations")
-    benchmark_parser.add_argument("--queries", nargs="+", help="Specific queries to run")
-    
-    return parser.parse_args()
+def visualize_results(args: argparse.Namespace) -> None:
+    """Visualize benchmark results."""
+    try:
+        results_dir = Path(args.results_dir)
+        if not results_dir.exists():
+            logger.error(f"Results directory {args.results_dir} does not exist")
+            sys.exit(1)
+            
+        dashboard = BenchmarkDashboard()
+        dashboard.render({
+            "queries": {},
+            "resource_metrics": [],
+            "metadata": {"overall": {}}
+        })
+    except Exception as e:
+        logger.error(f"Failed to visualize results: {str(e)}")
+        sys.exit(1)
 
-async def main() -> None:
+def main() -> None:
     """Main entry point."""
     args = parse_args()
     
-    if args.command == "generate-data":
-        await generate_data(args)
+    if args.command == "generate":
+        asyncio.run(generate_data(args))
     elif args.command == "benchmark":
-        await run_benchmark(args)
+        asyncio.run(run_benchmark(args))
+    elif args.command == "visualize":
+        visualize_results(args)
     else:
         logger.error("No command specified")
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    main() 
