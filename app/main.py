@@ -43,8 +43,15 @@ class Config:
     """Application configuration"""
     DREMIO1_HOST = os.getenv('DREMIO1_HOST', 'http://localhost:9047')
     DREMIO2_HOST = os.getenv('DREMIO2_HOST', 'http://localhost:9047')
+    DREMIO1_PORT = os.getenv('DREMIO1_PORT', '9047')
+    DREMIO2_PORT = os.getenv('DREMIO2_PORT', '9047')
+    DREMIO1_USERNAME = os.getenv('DREMIO1_USERNAME')
+    DREMIO2_USERNAME = os.getenv('DREMIO2_USERNAME')
+    DREMIO1_PASSWORD = os.getenv('DREMIO1_PASSWORD')
+    DREMIO2_PASSWORD = os.getenv('DREMIO2_PASSWORD')
     DREMIO1_TOKEN = os.getenv('DREMIO1_TOKEN')
-    DREMIO2_TOKEN = os.getenv('DREMIO2_TOKEN')
+    DREMIO1_AUTH_TYPE = os.getenv('DREMIO1_AUTH_TYPE', 'token')
+    DREMIO2_AUTH_TYPE = os.getenv('DREMIO2_AUTH_TYPE', 'password')
     REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '30'))
     MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))
     RETRY_DELAY = int(os.getenv('RETRY_DELAY', '1'))
@@ -136,13 +143,18 @@ def get_dremio_config(source: str) -> Dict[str, str]:
     """Get Dremio configuration for the specified source"""
     if source == "dremio1":
         return {
-            "host": Config.DREMIO1_HOST,
-            "token": Config.DREMIO1_TOKEN
+            "host": f"{Config.DREMIO1_HOST}:{Config.DREMIO1_PORT}",
+            "username": Config.DREMIO1_USERNAME,
+            "password": Config.DREMIO1_PASSWORD,
+            "token": Config.DREMIO1_TOKEN,
+            "auth_type": Config.DREMIO1_AUTH_TYPE
         }
     elif source == "dremio2":
         return {
-            "host": Config.DREMIO2_HOST,
-            "token": Config.DREMIO2_TOKEN
+            "host": f"{Config.DREMIO2_HOST}:{Config.DREMIO2_PORT}",
+            "username": Config.DREMIO2_USERNAME,
+            "password": Config.DREMIO2_PASSWORD,
+            "auth_type": Config.DREMIO2_AUTH_TYPE
         }
     else:
         raise ValueError(f"Invalid Dremio source: {source}")
@@ -166,10 +178,17 @@ async def execute_query(query: str, source: str = "dremio1") -> QueryResponse:
     
     while retries < Config.MAX_RETRIES:
         try:
-            headers = {
-                "Authorization": f"Bearer {dremio_config['token']}",
-                "Content-Type": "application/json"
-            }
+            # Prepare headers based on authentication type
+            if dremio_config['auth_type'] == 'token':
+                headers = {
+                    "Authorization": f"Bearer {dremio_config['token']}",
+                    "Content-Type": "application/json"
+                }
+            else:  # password authentication
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                auth = (dremio_config['username'], dremio_config['password'])
             
             # Use asyncio to run the request in a non-blocking way
             response = await asyncio.to_thread(
@@ -177,6 +196,7 @@ async def execute_query(query: str, source: str = "dremio1") -> QueryResponse:
                 f"{dremio_config['host']}/api/v3/sql",
                 headers=headers,
                 json={"sql": query},
+                auth=auth if dremio_config['auth_type'] == 'password' else None,
                 timeout=Config.REQUEST_TIMEOUT
             )
             
@@ -209,38 +229,21 @@ async def execute_query(query: str, source: str = "dremio1") -> QueryResponse:
                 query_hash=query_hash
             )
             
-        except Timeout:
+        except (RequestException, Timeout, ConnectionError) as e:
             retries += 1
-            logger.warning(f"Query timeout on {source}, attempt {retries}/{Config.MAX_RETRIES}")
             if retries == Config.MAX_RETRIES:
-                execution_time = time.time() - start_time
-                send_metric('query.timeout', 1, [f'source:{source}'])
+                logger.error(f"Failed to execute query after {Config.MAX_RETRIES} retries: {e}")
                 return QueryResponse(
-                    execution_time=execution_time,
+                    execution_time=time.time() - start_time,
                     success=False,
-                    error_message="Query execution timed out"
-                )
-            await asyncio.sleep(Config.RETRY_DELAY)
-            
-        except ConnectionError:
-            retries += 1
-            logger.warning(f"Connection error on {source}, attempt {retries}/{Config.MAX_RETRIES}")
-            if retries == Config.MAX_RETRIES:
-                execution_time = time.time() - start_time
-                send_metric('query.connection_error', 1, [f'source:{source}'])
-                return QueryResponse(
-                    execution_time=execution_time,
-                    success=False,
-                    error_message="Failed to connect to Dremio"
+                    error_message=str(e)
                 )
             await asyncio.sleep(Config.RETRY_DELAY)
             
         except Exception as e:
-            execution_time = time.time() - start_time
-            send_metric('query.error', 1, [f'source:{source}'])
-            logger.error(f"Error executing query on {source}: {str(e)}")
+            logger.error(f"Unexpected error executing query: {e}")
             return QueryResponse(
-                execution_time=execution_time,
+                execution_time=time.time() - start_time,
                 success=False,
                 error_message=str(e)
             )
