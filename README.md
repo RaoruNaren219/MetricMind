@@ -1,135 +1,132 @@
 # MetricMind
 
-A comprehensive benchmarking system for comparing Dremio instances using TPC-DS queries.
+MetricMind is a benchmarking tool for comparing Dremio instances using TPC-DS queries. It provides a comprehensive framework for generating test data, executing queries, and analyzing performance differences between Dremio deployments.
 
 ## Features
 
-- FastAPI-based REST API for query execution and comparison
-- TPC-DS data generation and upload automation
-- JMeter-based load testing
-- Automated benchmark execution with configurable scenarios
-- Detailed performance metrics collection
-- Datadog integration for metrics visualization
-- Comprehensive reporting system
-
-## Prerequisites
-
-- Python 3.8+
-- Apache JMeter
-- Dremio instances (source and target)
-- HDFS cluster
-- Datadog account (optional)
+- **TPC-DS Data Generation**: Generate TPC-DS test data with configurable scale factors
+- **Query Execution**: Execute TPC-DS queries against multiple Dremio instances
+- **Performance Comparison**: Compare execution times, resource usage, and data consistency
+- **HDFS Integration**: Upload generated data to HDFS and register as Dremio sources
+- **REST API**: Expose functionality through a FastAPI-based REST API
+- **Asynchronous Operations**: Efficient handling of long-running tasks
+- **Detailed Metrics**: Comprehensive performance metrics and statistics
+- **Graceful Cancellation**: Support for cancelling ongoing operations
+- **Resource Monitoring**: Track memory and CPU usage during query execution
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/RaoruNaren219/MetricMind.git
-cd MetricMind
-```
+### Prerequisites
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+- Python 3.8+
+- Dremio instances
+- HDFS cluster
+- TPC-DS data generator (dsdgen)
+
+### Setup
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/metricmind.git
+   cd metricmind
+   ```
+
+2. Create a virtual environment:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
 3. Install dependencies:
-```bash
-pip install -r requirements.txt
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. Configure the application:
+   - Copy `.env.example` to `.env`
+   - Update the configuration values in `.env`
+
+## Usage
+
+### Running the API
+
+```
+python -m metricmind.api.app
 ```
 
-4. Copy the environment configuration:
-```bash
-cp .env.example .env
+The API will be available at `http://localhost:8000`.
+
+### API Endpoints
+
+- `POST /api/v1/benchmark`: Run a benchmark comparison between two Dremio instances
+- `POST /api/v1/generate-data`: Generate TPC-DS test data
+- `GET /api/v1/health`: Health check endpoint
+
+### Command Line
+
+Generate TPC-DS data:
+```
+python -m metricmind.cli generate-data --scale 1.0
 ```
 
-5. Update the `.env` file with your configuration:
-```env
-# Dremio Configuration
-DREMIO1_HOST=your-dremio1-host
-DREMIO1_PORT=9047
-DREMIO1_USERNAME=your-username
-DREMIO1_PASSWORD=your-password
-DREMIO1_TOKEN=your-token
-
-DREMIO2_HOST=your-dremio2-host
-DREMIO2_PORT=9047
-DREMIO2_USERNAME=your-username
-DREMIO2_PASSWORD=your-password
-DREMIO2_TOKEN=your-token
-
-# HDFS Configuration
-HDFS_HOST=your-hdfs-host
-HDFS_PORT=8020
-HDFS_USER=your-hdfs-user
-HDFS_PATH=/path/to/data
-
-# Datadog Configuration (Optional)
-DD_API_KEY=your-api-key
-DD_APP_KEY=your-app-key
-DD_ENABLED=true
+Run benchmarks:
 ```
+python -m metricmind.cli benchmark --iterations 3
+```
+
+## Configuration
+
+The application can be configured through environment variables or a `.env` file. See `.env.example` for available options.
 
 ## Project Structure
 
 ```
-MetricMind/
-├── app/                    # FastAPI application
-│   └── main.py            # Main application file
-├── scripts/               # Utility scripts
-│   ├── generate_tpcds_data.py  # TPC-DS data generation
-│   └── run_benchmark.sh   # Benchmark automation
-├── jmeter/               # JMeter test plans
-│   └── dremio_benchmark.jmx
-├── config/               # Configuration files
-├── data/                 # Data directory
-└── requirements.txt      # Python dependencies
+metricmind/
+├── metricmind/
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── app.py
+│   │   └── routes.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── data_generator.py
+│   │   └── query_executor.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   └── logger.py
+│   └── __init__.py
+├── tests/
+├── .env.example
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── setup.py
 ```
 
-## Usage
+## Development
 
-1. Generate and upload TPC-DS data:
-```bash
-python scripts/generate_tpcds_data.py --scale-factor 1
+### Running Tests
+
+```
+pytest
 ```
 
-2. Start the FastAPI application:
-```bash
-python -m MetricMind.app.main
+### Code Style
+
+```
+black metricmind
+flake8 metricmind
+mypy metricmind
 ```
 
-3. Run benchmarks:
-```bash
-./scripts/run_benchmark.sh --scenario full --iterations 3
-```
+## License
 
-## API Endpoints
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-- `GET /health` - Health check endpoint
-- `POST /query/simple` - Execute simple TPC-DS query
-- `POST /query/complex` - Execute complex TPC-DS query
-- `POST /compare/query` - Compare query results between Dremio instances
+## Acknowledgments
 
-## Metrics Collected
-
-- Query execution time
-- Row count
-- Payload size
-- Result match percentage
-- JMeter performance metrics
-
-## Visualization
-
-Metrics are automatically sent to Datadog (if enabled) and can be visualized using:
-- Time series graphs
-- Heat maps
-- Comparison dashboards
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request 
+- TPC-DS benchmark suite
+- Dremio
+- FastAPI
+- aiohttp 

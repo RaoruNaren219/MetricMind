@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,35 +15,78 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
 venv/
+env/
 ENV/
+.env
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+.DS_Store
 
 # Logs
-*.log
 logs/
+*.log
+log/
 
 # Data
 data/
-results/
+tpcds_data/
+*.csv
+*.parquet
+*.json
+*.sqlite
+*.db
 
-# Environment variables
-.env
+# Temporary files
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# pytest
+.pytest_cache/
+
+# Project specific
+queries/
+*.env
+.env.local
+.env.development
+.env.test
+.env.production
 
 # JMeter
 *.jtl
 jmeter_report*/
 
 # OS
-.DS_Store
 Thumbs.db 
