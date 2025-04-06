@@ -1,93 +1,210 @@
 import asyncio
-from typing import Dict, List, Any, Optional, Tuple, Set
-import aiohttp
-import json
-from datetime import datetime
 import hashlib
-from functools import lru_cache
+import json
 import time
-import numpy as np
-from dataclasses import dataclass
-from enum import Enum
-import os
-import pathlib
-import re
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 
-from metricmind.utils.config import Settings, get_settings
+import httpx
+from pydantic import BaseModel, Field
+
+from metricmind.utils.config import get_settings
 from metricmind.utils.logger import setup_logger
 from metricmind.monitoring.system import SystemMonitor
 
 logger = setup_logger(__name__)
 
-class QueryStatus(Enum):
-    """Enum for query execution status."""
-    SUCCESS = "success"
+class QueryStatus:
+    """Query execution status."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
     FAILED = "failed"
-    TIMEOUT = "timeout"
-    RETRY = "retry"
     CANCELLED = "cancelled"
 
-@dataclass
-class QueryResult:
-    """Data class for query execution results."""
-    status: QueryStatus
-    execution_time: float
-    row_count: int
-    data: List[Any]
-    query_hash: str
-    timestamp: str
-    error: Optional[str] = None
-    retry_count: int = 0
-    memory_usage: Optional[float] = None
-    cpu_usage: Optional[float] = None
-    metrics: Optional['QueryMetrics'] = None
+class QueryMetrics(BaseModel):
+    """Query execution metrics."""
+    execution_time: float = Field(default=0.0)
+    memory_usage: float = Field(default=0.0)
+    cpu_usage: float = Field(default=0.0)
+    rows_processed: int = Field(default=0)
+    bytes_processed: int = Field(default=0)
 
-@dataclass
-class QueryMetrics:
-    """Data class for query performance metrics."""
-    min_time: float
-    max_time: float
-    avg_time: float
-    median_time: float
-    std_dev: float
-    success_rate: float
-    row_count: int
-    query_hash: str
-    memory_usage: Optional[float] = None
-    cpu_usage: Optional[float] = None
-    execution_time: float
-    data_size: int
+class QueryResult(BaseModel):
+    """Query execution result."""
+    status: str = Field(default=QueryStatus.PENDING)
+    metrics: QueryMetrics = Field(default_factory=QueryMetrics)
+    error: Optional[str] = Field(default=None)
+    data: Optional[List[Dict]] = Field(default=None)
+    query_hash: Optional[str] = Field(default=None)
+    timestamp: Optional[datetime] = Field(default=None)
 
 class QueryExecutor:
-    """Handles execution of TPC-DS queries against Dremio instances."""
+    """Executes queries and collects metrics."""
     
-    def __init__(self, settings=None):
+    def __init__(
+        self,
+        queries_dir: Path,
+        output_dir: Path,
+        iterations: int = 3,
+        settings: Optional[Dict] = None
+    ):
+        self.queries_dir = queries_dir
+        self.output_dir = output_dir
+        self.iterations = iterations
         self.settings = settings or get_settings()
         self.logger = logger
-        self.timeout = aiohttp.ClientTimeout(total=self.settings.REQUEST_TIMEOUT)
-        self.max_retries = self.settings.MAX_RETRIES
-        self.retry_delay = self.settings.RETRY_DELAY
-        self._session = None
+        self._client = None
         self._monitor = SystemMonitor(interval=0.5)
+        self._cache = {}
         self._cancelled = False
-        self._query_cache = {}
         
     async def __aenter__(self):
-        """Create aiohttp session when entering context."""
-        self._session = aiohttp.ClientSession(timeout=self.timeout)
+        """Initialize HTTP client."""
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True
+        )
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Close aiohttp session when exiting context."""
-        if self._session:
-            await self._session.close()
-            self._session = None
+        """Close HTTP client."""
+        if self._client:
+            await self._client.aclose()
             
     def cancel(self):
         """Cancel ongoing operations."""
         self._cancelled = True
-        self.logger.info("Query execution cancelled")
+        logger.info("Cancelling ongoing operations")
         
+    async def run_benchmark(self) -> Dict[str, Any]:
+        """Run benchmark comparison."""
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            
+            results = {
+                "queries": {},
+                "resource_metrics": [],
+                "metadata": {
+                    "start_time": datetime.now().isoformat(),
+                    "end_time": None,
+                    "status": "running",
+                    "overall": {}
+                }
+            }
+            
+            # Execute queries
+            query_files = list(self.queries_dir.glob("*.sql"))
+            for query_file in query_files:
+                query_name = query_file.stem
+                self.logger.info(f"Executing query: {query_name}")
+                
+                with open(query_file) as f:
+                    query = f.read()
+                    
+                query_results = await self._execute_query(query, query_name)
+                results["queries"][query_name] = query_results
+                
+            # Calculate overall metrics
+            results["metadata"]["end_time"] = datetime.now().isoformat()
+            results["metadata"]["status"] = "completed"
+            results["metadata"]["overall"] = self._calculate_statistics(results["queries"])
+            
+            # Save results
+            self._save_results(results)
+            
+            return results
+        except Exception as e:
+            self.logger.error(f"Benchmark failed: {str(e)}")
+            raise
+            
+    async def _execute_query(
+        self,
+        query: str,
+        query_name: str,
+        retries: int = 3
+    ) -> Dict[str, QueryResult]:
+        """Execute query on both Dremio instances."""
+        results = {}
+        
+        for instance in ["dremio1", "dremio2"]:
+            result = QueryResult(
+                status=QueryStatus.PENDING,
+                query_hash=hashlib.md5(query.encode()).hexdigest(),
+                timestamp=datetime.now()
+            )
+            
+            try:
+                for i in range(self.iterations):
+                    start_time = time.time()
+                    
+                    # Execute query
+                    response = await self._client.post(
+                        f"{getattr(self.settings, f'{instance}_url')}/api/v3/sql",
+                        json={"query": query},
+                        headers=self.settings.get_auth_headers(1 if instance == "dremio1" else 2)
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        execution_time = time.time() - start_time
+                        
+                        result.metrics.execution_time += execution_time
+                        result.metrics.rows_processed += len(data.get("rows", []))
+                        result.metrics.bytes_processed += len(response.content)
+                        
+                        if i == 0:  # Store data only for first iteration
+                            result.data = data.get("rows", [])
+                    else:
+                        raise Exception(f"Query failed with status {response.status_code}")
+                        
+                # Calculate averages
+                result.metrics.execution_time /= self.iterations
+                result.metrics.rows_processed //= self.iterations
+                result.metrics.bytes_processed //= self.iterations
+                result.status = QueryStatus.COMPLETED
+                
+            except Exception as e:
+                self.logger.error(f"Query execution failed: {str(e)}")
+                result.status = QueryStatus.FAILED
+                result.error = str(e)
+                
+            results[instance] = result
+            
+        return results
+        
+    def _calculate_statistics(self, query_results: Dict[str, Dict[str, QueryResult]]) -> Dict[str, float]:
+        """Calculate overall statistics from query results."""
+        performance_ratios = []
+        success_count = 0
+        total_queries = len(query_results)
+        
+        for query_name, results in query_results.items():
+            if "dremio1" in results and "dremio2" in results:
+                d1_result = results["dremio1"]
+                d2_result = results["dremio2"]
+                
+                if d1_result.status == QueryStatus.COMPLETED and d2_result.status == QueryStatus.COMPLETED:
+                    ratio = d2_result.metrics.execution_time / d1_result.metrics.execution_time
+                    performance_ratios.append(ratio)
+                    success_count += 1
+                    
+        return {
+            "avg_performance_ratio": sum(performance_ratios) / len(performance_ratios) if performance_ratios else 0,
+            "median_performance_ratio": sorted(performance_ratios)[len(performance_ratios)//2] if performance_ratios else 0,
+            "success_rate": success_count / total_queries if total_queries > 0 else 0
+        }
+        
+    def _save_results(self, results: Dict[str, Any]) -> None:
+        """Save benchmark results to file."""
+        output_file = self.output_dir / f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        with open(output_file, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+            
+        self.logger.info(f"Results saved to {output_file}")
+
     async def _execute_query(
         self,
         query: str,
@@ -100,9 +217,6 @@ class QueryExecutor:
                 status=QueryStatus.FAILED,
                 execution_time=0,
                 row_count=0,
-                data=[],
-                query_hash=hash(query),
-                timestamp=datetime.utcnow().isoformat(),
                 error="Operation cancelled"
             )
             
@@ -121,13 +235,13 @@ class QueryExecutor:
             
             # Execute query with timeout
             start_time = time.time()
-            async with self._session.post(
+            async with self._client.post(
                 url,
                 json=data,
                 headers=headers,
                 timeout=self.settings.REQUEST_TIMEOUT
             ) as response:
-                if response.status == 200:
+                if response.status_code == 200:
                     result = await response.json()
                     execution_time = time.time() - start_time
                     
@@ -135,7 +249,7 @@ class QueryExecutor:
                     metrics = self._monitor.get_summary()
                     
                     return QueryResult(
-                        status=QueryStatus.SUCCESS,
+                        status=QueryStatus.COMPLETED,
                         execution_time=execution_time,
                         row_count=result.get("rowCount", 0),
                         data=result.get("data", []),
@@ -145,26 +259,23 @@ class QueryExecutor:
                             execution_time=execution_time,
                             memory_usage=metrics.get("memory", {}).get("avg", 0),
                             cpu_usage=metrics.get("cpu", {}).get("avg", 0),
-                            row_count=result.get("rowCount", 0),
-                            data_size=len(str(result.get("data", [])))
+                            rows_processed=result.get("rowCount", 0),
+                            bytes_processed=len(str(result.get("data", [])))
                         )
                     )
                 else:
                     error_text = await response.text()
-                    raise Exception(f"Query failed with status {response.status}: {error_text}")
+                    raise Exception(f"Query failed with status {response.status_code}: {error_text}")
                     
         except asyncio.TimeoutError:
-            if retry_count < self.max_retries:
-                self.logger.warning(f"Query timeout, retrying ({retry_count + 1}/{self.max_retries})")
-                await asyncio.sleep(self.retry_delay * (2 ** retry_count))
+            if retry_count < self.settings.MAX_RETRIES:
+                logger.warning(f"Query timeout, retrying ({retry_count + 1}/{self.settings.MAX_RETRIES})")
+                await asyncio.sleep(self.settings.RETRY_DELAY * (2 ** retry_count))
                 return await self._execute_query(query, instance, retry_count + 1)
             return QueryResult(
-                status=QueryStatus.TIMEOUT,
+                status=QueryStatus.FAILED,
                 execution_time=0,
                 row_count=0,
-                data=[],
-                query_hash=hash(query),
-                timestamp=datetime.utcnow().isoformat(),
                 error="Query execution timed out"
             )
             
@@ -173,9 +284,6 @@ class QueryExecutor:
                 status=QueryStatus.FAILED,
                 execution_time=0,
                 row_count=0,
-                data=[],
-                query_hash=hash(query),
-                timestamp=datetime.utcnow().isoformat(),
                 error=str(e)
             )
             
@@ -203,12 +311,12 @@ class QueryExecutor:
             self._monitor.start()
             
             # Load queries
-            queries_dir = pathlib.Path(self.settings.TPC_DS_QUERIES_DIR)
+            queries_dir = Path(self.settings.TPC_DS_QUERIES_DIR)
             query_files = list(queries_dir.glob("*.sql"))
             
             if not query_files:
-                self.logger.warning("No query files found, using sample query")
-                query_files = [pathlib.Path("sample.sql")]
+                logger.warning("No query files found, using sample query")
+                query_files = [Path("sample.sql")]
                 query_files[0].write_text("SELECT 1")
                 
             # Filter queries if specified
@@ -248,7 +356,7 @@ class QueryExecutor:
             })
             
         except Exception as e:
-            self.logger.error(f"Benchmark failed: {e}")
+            logger.error(f"Benchmark failed: {e}")
             results["metadata"].update({
                 "status": "failed",
                 "error": str(e)
@@ -265,18 +373,18 @@ class QueryExecutor:
         if not results:
             return {}
             
-        execution_times = [r.execution_time for r in results if r.status == QueryStatus.SUCCESS]
+        execution_times = [r.execution_time for r in results if r.status == QueryStatus.COMPLETED]
         memory_usage = [r.metrics.memory_usage for r in results if r.metrics]
         cpu_usage = [r.metrics.cpu_usage for r in results if r.metrics]
         
         return {
-            "avg_execution_time": np.mean(execution_times) if execution_times else 0,
-            "min_execution_time": min(execution_times) if execution_times else 0,
-            "max_execution_time": max(execution_times) if execution_times else 0,
-            "median_execution_time": np.median(execution_times) if execution_times else 0,
-            "std_execution_time": np.std(execution_times) if execution_times else 0,
-            "avg_memory_usage": np.mean(memory_usage) if memory_usage else 0,
-            "avg_cpu_usage": np.mean(cpu_usage) if cpu_usage else 0,
+            "avg_execution_time": float(np.mean(execution_times)) if execution_times else 0,
+            "min_execution_time": float(min(execution_times)) if execution_times else 0,
+            "max_execution_time": float(max(execution_times)) if execution_times else 0,
+            "median_execution_time": float(np.median(execution_times)) if execution_times else 0,
+            "std_execution_time": float(np.std(execution_times)) if execution_times else 0,
+            "avg_memory_usage": float(np.mean(memory_usage)) if memory_usage else 0,
+            "avg_cpu_usage": float(np.mean(cpu_usage)) if cpu_usage else 0,
             "success_rate": len(execution_times) / len(results),
             "error": next((r.error for r in results if r.error), None)
         }
@@ -300,59 +408,7 @@ class QueryExecutor:
                 )
                 
         return {
-            "avg_performance_ratio": np.mean(ratios) if ratios else 0,
-            "median_performance_ratio": np.median(ratios) if ratios else 0,
-            "success_rate": np.mean(success_rates) if success_rates else 0
-        }
-        
-    @lru_cache(maxsize=1)
-    def _load_tpcds_queries(self) -> Dict[str, str]:
-        """Load TPC-DS queries from file with caching."""
-        queries = {}
-        
-        # Check if queries directory exists
-        queries_dir = pathlib.Path("queries")
-        if not queries_dir.exists():
-            self.logger.warning("Queries directory not found, using sample query")
-            return self._get_sample_query()
-            
-        # Load queries from files
-        for query_file in queries_dir.glob("*.sql"):
-            query_name = query_file.stem
-            with open(query_file, "r") as f:
-                queries[query_name] = f.read()
-                
-        if not queries:
-            self.logger.warning("No queries found in queries directory, using sample query")
-            return self._get_sample_query()
-            
-        self.logger.info(f"Loaded {len(queries)} queries from {queries_dir}")
-        return queries
-        
-    def _get_sample_query(self) -> Dict[str, str]:
-        """Return a sample TPC-DS query."""
-        return {
-            "q1": """
-            SELECT 
-                l_returnflag,
-                l_linestatus,
-                sum(l_quantity) as sum_qty,
-                sum(l_extendedprice) as sum_base_price,
-                sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
-                sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
-                avg(l_quantity) as avg_qty,
-                avg(l_extendedprice) as avg_price,
-                avg(l_discount) as avg_disc,
-                count(*) as count_order
-            FROM
-                lineitem
-            WHERE
-                l_shipdate <= date '1998-12-01' - interval '90' day
-            GROUP BY
-                l_returnflag,
-                l_linestatus
-            ORDER BY
-                l_returnflag,
-                l_linestatus;
-            """
+            "avg_performance_ratio": float(np.mean(ratios)) if ratios else 0,
+            "median_performance_ratio": float(np.median(ratios)) if ratios else 0,
+            "success_rate": float(np.mean(success_rates)) if success_rates else 0
         } 

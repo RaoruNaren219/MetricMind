@@ -3,7 +3,7 @@ import aiohttp
 import aiofiles
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple, Set
 import hashlib
 from functools import lru_cache
@@ -16,8 +16,14 @@ import pathlib
 import re
 import json
 import tempfile
+import random
 
-from metricmind.utils.config import Settings
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+from tqdm import tqdm
+
+from metricmind.utils.config import Settings, get_settings
 from metricmind.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -55,14 +61,21 @@ class DataGenStats:
     error: Optional[str] = None
 
 class DataGenerator:
-    """Handles TPC-DS data generation and upload to Dremio."""
+    """TPC-DS data generator."""
     
-    def __init__(self, settings: Settings):
-        self.settings = settings
+    def __init__(
+        self,
+        output_dir: pathlib.Path,
+        scale_factor: float = 1.0,
+        settings: Optional[Dict] = None
+    ):
+        self.output_dir = output_dir
+        self.scale_factor = scale_factor
+        self.settings = settings or get_settings()
         self.logger = logger
-        self.timeout = aiohttp.ClientTimeout(total=settings.REQUEST_TIMEOUT)
-        self.max_retries = settings.MAX_RETRIES
-        self.retry_delay = settings.RETRY_DELAY
+        self.timeout = aiohttp.ClientTimeout(total=self.settings.REQUEST_TIMEOUT)
+        self.max_retries = self.settings.MAX_RETRIES
+        self.retry_delay = self.settings.RETRY_DELAY
         self.chunk_size = 1024 * 1024  # 1MB chunks for file uploads
         self._session = None
         self._cancelled = False
@@ -293,6 +306,76 @@ class DataGenerator:
             self.logger.error(f"Error registering source: {str(e)}")
             return False
             
+    async def generate(self) -> None:
+        """Generate TPC-DS data."""
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate customer data
+            await self._generate_customers()
+            
+            # Generate orders data
+            await self._generate_orders()
+            
+            self.logger.info("Data generation completed successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to generate data: {str(e)}")
+            raise
+            
+    async def _generate_customers(self) -> None:
+        """Generate customer data."""
+        num_customers = int(100000 * self.scale_factor)
+        
+        # Generate customer data
+        customers = []
+        for i in range(num_customers):
+            customer = {
+                "customer_id": i + 1,
+                "first_name": f"FirstName{i}",
+                "last_name": f"LastName{i}",
+                "email": f"customer{i}@example.com",
+                "phone": f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}",
+                "address": f"{random.randint(1, 999)} Main St",
+                "city": random.choice(["New York", "Los Angeles", "Chicago", "Houston", "Phoenix"]),
+                "state": random.choice(["NY", "CA", "IL", "TX", "AZ"]),
+                "zipcode": f"{random.randint(10000, 99999)}",
+                "country": "USA",
+                "created_at": datetime.now() - timedelta(days=random.randint(0, 365))
+            }
+            customers.append(customer)
+            
+        # Convert to DataFrame and save
+        df = pd.DataFrame(customers)
+        table = pa.Table.from_pandas(df)
+        pq.write_table(table, self.output_dir / "customers.parquet")
+        
+    async def _generate_orders(self) -> None:
+        """Generate orders data."""
+        num_orders = int(1000000 * self.scale_factor)
+        
+        # Generate order data
+        orders = []
+        for i in range(num_orders):
+            order = {
+                "order_id": i + 1,
+                "customer_id": random.randint(1, int(100000 * self.scale_factor)),
+                "order_date": datetime.now() - timedelta(days=random.randint(0, 365)),
+                "total_amount": round(random.uniform(10.0, 1000.0), 2),
+                "status": random.choice(["pending", "completed", "cancelled"]),
+                "payment_method": random.choice(["credit_card", "debit_card", "paypal"]),
+                "shipping_address": f"{random.randint(1, 999)} Main St",
+                "shipping_city": random.choice(["New York", "Los Angeles", "Chicago", "Houston", "Phoenix"]),
+                "shipping_state": random.choice(["NY", "CA", "IL", "TX", "AZ"]),
+                "shipping_zipcode": f"{random.randint(10000, 99999)}",
+                "shipping_country": "USA"
+            }
+            orders.append(order)
+            
+        # Convert to DataFrame and save
+        df = pd.DataFrame(orders)
+        table = pa.Table.from_pandas(df)
+        pq.write_table(table, self.output_dir / "orders.parquet")
+
     async def generate_data(self) -> Dict[str, Any]:
         """Generate TPC-DS data and register in Dremio."""
         self.logger.info("Starting TPC-DS data generation")

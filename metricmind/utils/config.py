@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from typing import Dict, Optional
 from pydantic import BaseSettings, Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Settings(BaseSettings):
     # Dremio Configuration
@@ -79,6 +83,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        case_sensitive = True
         
     def get_auth_headers(self, instance: int) -> Dict[str, str]:
         """Get authentication headers for the specified Dremio instance."""
@@ -110,7 +115,7 @@ class Settings(BaseSettings):
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
             
-_settings = None
+_settings: Optional[Settings] = None
 
 def get_settings() -> Settings:
     """Get or create settings instance."""
