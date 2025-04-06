@@ -1,45 +1,53 @@
-# Core data processing libraries
-numpy>=1.21.0,<2.0.0
-pandas>=1.5.3,<2.0.0
-pyarrow>=12.0.1,<15.0.0
-
-# HTTP and environment management
-requests==2.31.0
-python-dotenv==1.0.0
-
-# System monitoring and progress tracking
-psutil==5.9.5
-tqdm==4.65.0
-
-# Logging and output formatting
-loguru==0.7.2
-tabulate==0.9.0
-colorama==0.4.6
-
-# Build dependencies
-wheel>=0.38.4
-setuptools>=65.5.1
-
-# Visualization libraries
-streamlit==1.29.0
-plotly==5.18.0
-
-# FastAPI and Uvicorn
+# Core dependencies
 fastapi==0.104.1
 uvicorn==0.23.2
+pydantic==2.4.2
+aiohttp==3.8.6
+aiofiles==23.2.1
+python-dotenv==1.0.0
+
+# Data processing
+numpy==1.26.1
+pandas==2.1.2
+pyarrow==14.0.1
+altair==5.4.1
+
+# Monitoring and logging
+psutil==5.9.6
+loguru==0.7.2
+tqdm==4.66.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# Code quality
+black==23.10.1
+flake8==6.1.0
+mypy==1.6.1
+isort==5.12.0
+
+# API and HTTP
+httpx==0.25.1
+python-multipart==0.0.6
+python-jose==3.3.0
+
+# Type hints
+typing-extensions>=4.10.0
+
+# Visualization
+streamlit==1.28.1
+plotly==5.18.0
+
+# Additional dependencies
+wheel>=0.38.4
+setuptools>=65.5.1
 
 # Datadog
 datadog==0.47.0
 
-# Python-jose
-python-jose==3.3.0
-
-# Pydantic
-pydantic==2.4.2
-
 # Additional dependencies
-aiohttp==3.8.6
-aiofiles==23.2.1
 pytest==7.4.3
 pytest-asyncio==0.21.1
 black==23.10.1
@@ -49,7 +57,6 @@ isort==5.12.0
 httpx==0.25.1
 python-multipart==0.0.6
 typing-extensions>=4.10.0
-altair==5.4.1
 
 # New version of numpy
 numpy==1.26.1 

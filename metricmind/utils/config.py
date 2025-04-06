@@ -1,135 +1,121 @@
-from pydantic import BaseSettings
-from functools import lru_cache
-from typing import Optional, Dict, Any, List
 import os
-import pathlib
+from pathlib import Path
+from typing import Dict, Optional
+from pydantic import BaseSettings, Field
 
 class Settings(BaseSettings):
-    """Application settings."""
+    # Dremio Configuration
+    DREMIO1_HOST: str = Field(..., env="DREMIO1_HOST")
+    DREMIO1_PORT: int = Field(..., env="DREMIO1_PORT")
+    DREMIO1_USERNAME: str = Field(..., env="DREMIO1_USERNAME")
+    DREMIO1_PASSWORD: Optional[str] = Field(None, env="DREMIO1_PASSWORD")
+    DREMIO1_PAT_TOKEN: Optional[str] = Field(None, env="DREMIO1_PAT_TOKEN")
     
-    # Dremio 1 Configuration
-    DREMIO1_HOST: str = "localhost"
-    DREMIO1_PORT: int = 9047
-    DREMIO1_USERNAME: str = "admin"
-    DREMIO1_PASSWORD: Optional[str] = None
-    DREMIO1_PAT_TOKEN: Optional[str] = None
-    
-    # Dremio 2 Configuration
-    DREMIO2_HOST: str = "localhost"
-    DREMIO2_PORT: int = 9047
-    DREMIO2_USERNAME: str = "admin"
-    DREMIO2_PASSWORD: Optional[str] = None
-    DREMIO2_PAT_TOKEN: Optional[str] = None
+    DREMIO2_HOST: str = Field(..., env="DREMIO2_HOST")
+    DREMIO2_PORT: int = Field(..., env="DREMIO2_PORT")
+    DREMIO2_USERNAME: str = Field(..., env="DREMIO2_USERNAME")
+    DREMIO2_PASSWORD: Optional[str] = Field(None, env="DREMIO2_PASSWORD")
+    DREMIO2_PAT_TOKEN: Optional[str] = Field(None, env="DREMIO2_PAT_TOKEN")
     
     # TPC-DS Configuration
-    TPC_DS_SCALE_FACTOR: float = 1.0
-    TPC_DS_DATA_DIR: str = "tpcds_data"
-    TPC_DS_QUERIES_DIR: str = "queries"
+    TPC_DS_SCALE_FACTOR: int = Field(1, env="TPC_DS_SCALE_FACTOR")
+    TPC_DS_DATA_DIR: Path = Field(Path("data"), env="TPC_DS_DATA_DIR")
+    TPC_DS_QUERIES_DIR: Path = Field(Path("queries"), env="TPC_DS_QUERIES_DIR")
     
     # HDFS Configuration
-    HDFS_URL: str = "http://localhost:9870"
-    HDFS_BASE_PATH: str = "/tpcds"
-    HDFS_USERNAME: Optional[str] = None
-    HDFS_PASSWORD: Optional[str] = None
+    HDFS_URL: str = Field(..., env="HDFS_URL")
+    HDFS_BASE_PATH: str = Field("/tpcds", env="HDFS_BASE_PATH")
+    HDFS_USERNAME: str = Field(..., env="HDFS_USERNAME")
+    HDFS_PASSWORD: Optional[str] = Field(None, env="HDFS_PASSWORD")
     
     # API Configuration
-    API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
-    API_WORKERS: int = 4
-    API_RELOAD: bool = True
+    API_HOST: str = Field("0.0.0.0", env="API_HOST")
+    API_PORT: int = Field(8000, env="API_PORT")
+    API_WORKERS: int = Field(4, env="API_WORKERS")
+    API_RELOAD: bool = Field(True, env="API_RELOAD")
     
     # Request Configuration
-    REQUEST_TIMEOUT: int = 300  # 5 minutes
-    MAX_RETRIES: int = 3
-    RETRY_DELAY: float = 1.0
-    CHUNK_SIZE: int = 1024 * 1024  # 1MB
+    REQUEST_TIMEOUT: int = Field(300, env="REQUEST_TIMEOUT")
+    MAX_RETRIES: int = Field(3, env="MAX_RETRIES")
+    RETRY_DELAY: int = Field(5, env="RETRY_DELAY")
+    CHUNK_SIZE: int = Field(8192, env="CHUNK_SIZE")
     
     # Logging Configuration
-    LOG_LEVEL: str = "INFO"
-    LOG_FILE: Optional[str] = None
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    LOG_LEVEL: str = Field("INFO", env="LOG_LEVEL")
+    LOG_FILE: Path = Field(Path("logs/metricmind.log"), env="LOG_FILE")
+    LOG_FORMAT: str = Field(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        env="LOG_FORMAT"
+    )
     
     # Cache Configuration
-    CACHE_ENABLED: bool = True
-    CACHE_TTL: int = 3600  # 1 hour
-    CACHE_MAX_SIZE: int = 1000
+    CACHE_ENABLED: bool = Field(True, env="CACHE_ENABLED")
+    CACHE_TTL: int = Field(3600, env="CACHE_TTL")
+    CACHE_MAX_SIZE: int = Field(1000, env="CACHE_MAX_SIZE")
     
     # Benchmark Configuration
-    BENCHMARK_ITERATIONS: int = 1
-    BENCHMARK_TIMEOUT: int = 3600  # 1 hour
-    BENCHMARK_MEMORY_LIMIT: Optional[int] = None
-    BENCHMARK_CPU_LIMIT: Optional[int] = None
+    BENCHMARK_ITERATIONS: int = Field(3, env="BENCHMARK_ITERATIONS")
+    BENCHMARK_TIMEOUT: int = Field(3600, env="BENCHMARK_TIMEOUT")
+    BENCHMARK_MEMORY_LIMIT: int = Field(4096, env="BENCHMARK_MEMORY_LIMIT")
+    BENCHMARK_CPU_LIMIT: int = Field(2, env="BENCHMARK_CPU_LIMIT")
     
     # Data Generation Configuration
-    DATA_GEN_TIMEOUT: int = 7200  # 2 hours
-    DATA_GEN_MEMORY_LIMIT: Optional[int] = None
-    DATA_GEN_CPU_LIMIT: Optional[int] = None
-    DATA_GEN_PARALLEL_UPLOADS: int = 4
+    DATA_GEN_TIMEOUT: int = Field(7200, env="DATA_GEN_TIMEOUT")
+    DATA_GEN_MEMORY_LIMIT: int = Field(8192, env="DATA_GEN_MEMORY_LIMIT")
+    DATA_GEN_CPU_LIMIT: int = Field(4, env="DATA_GEN_CPU_LIMIT")
+    DATA_GEN_PARALLEL_UPLOADS: int = Field(4, env="DATA_GEN_PARALLEL_UPLOADS")
+    
+    # Output Configuration
+    OUTPUT_DIR: Path = Field(Path("output"), env="OUTPUT_DIR")
+    OUTPUT_FORMAT: str = Field("parquet", env="OUTPUT_FORMAT")
+    OUTPUT_COMPRESSION: str = Field("snappy", env="OUTPUT_COMPRESSION")
+    
+    # Visualization Configuration
+    VIZ_THEME: str = Field("light", env="VIZ_THEME")
+    VIZ_WIDTH: int = Field(1200, env="VIZ_WIDTH")
+    VIZ_HEIGHT: int = Field(800, env="VIZ_HEIGHT")
+    VIZ_COLOR_PALETTE: str = Field("default", env="VIZ_COLOR_PALETTE")
     
     class Config:
-        """Pydantic configuration."""
         env_file = ".env"
-        case_sensitive = True
+        env_file_encoding = "utf-8"
         
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._validate_paths()
-        
-    def _validate_paths(self):
-        """Validate and create necessary directories."""
-        # Create data directory if it doesn't exist
-        data_dir = pathlib.Path(self.TPC_DS_DATA_DIR)
-        if not data_dir.exists():
-            data_dir.mkdir(parents=True)
+    def get_auth_headers(self, instance: int) -> Dict[str, str]:
+        """Get authentication headers for the specified Dremio instance."""
+        if instance not in [1, 2]:
+            raise ValueError("Instance must be 1 or 2")
             
-        # Create queries directory if it doesn't exist
-        queries_dir = pathlib.Path(self.TPC_DS_QUERIES_DIR)
-        if not queries_dir.exists():
-            queries_dir.mkdir(parents=True)
-            
-        # Create log directory if specified
-        if self.LOG_FILE:
-            log_dir = pathlib.Path(self.LOG_FILE).parent
-            if not log_dir.exists():
-                log_dir.mkdir(parents=True)
-                
-    @property
-    def dremio1_url(self) -> str:
-        """Get Dremio 1 base URL."""
-        return f"http://{self.DREMIO1_HOST}:{self.DREMIO1_PORT}"
+        username = getattr(self, f"DREMIO{instance}_USERNAME")
+        password = getattr(self, f"DREMIO{instance}_PASSWORD")
+        pat_token = getattr(self, f"DREMIO{instance}_PAT_TOKEN")
         
-    @property
-    def dremio2_url(self) -> str:
-        """Get Dremio 2 base URL."""
-        return f"http://{self.DREMIO2_HOST}:{self.DREMIO2_PORT}"
-        
-    @property
-    def hdfs_url(self) -> str:
-        """Get HDFS base URL."""
-        return self.HDFS_URL
-        
-    @property
-    def api_url(self) -> str:
-        """Get API base URL."""
-        return f"http://{self.API_HOST}:{self.API_PORT}"
-        
-    def get_auth_headers(self, instance: str = "dremio1") -> Dict[str, str]:
-        """Get authentication headers for Dremio instance."""
-        if instance == "dremio1":
-            username = self.DREMIO1_USERNAME
-            password = self.DREMIO1_PAT_TOKEN or self.DREMIO1_PASSWORD
+        if pat_token:
+            return {"Authorization": f"Bearer {pat_token}"}
+        elif password:
+            import base64
+            auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+            return {"Authorization": f"Basic {auth}"}
         else:
-            username = self.DREMIO2_USERNAME
-            password = self.DREMIO2_PAT_TOKEN or self.DREMIO2_PASSWORD
+            raise ValueError(f"No authentication method configured for Dremio instance {instance}")
             
-        if not password:
-            raise ValueError(f"No password or PAT token provided for {instance}")
-            
-        return {
-            "Authorization": f"Basic {username}:{password}"
-        }
+    def ensure_directories(self):
+        """Ensure all required directories exist."""
+        directories = [
+            self.TPC_DS_DATA_DIR,
+            self.TPC_DS_QUERIES_DIR,
+            self.LOG_FILE.parent,
+            self.OUTPUT_DIR
+        ]
         
-@lru_cache()
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+            
+_settings = None
+
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings() 
+    """Get or create settings instance."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+        _settings.ensure_directories()
+    return _settings 
